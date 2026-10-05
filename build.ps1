@@ -29,7 +29,7 @@ if (-not (Test-Path $Esbuild)) {
 $outFile = Join-Path $Root "main.js"
 
 # Local install destination inside the vault
-$installDir = Join-Path $Root "..\..\..\.obsidian\plugins\my-task-checker"
+$installDir = Join-Path $Root "..\..\ToDo\personal\.obsidian\plugins\my-task-checker"
 
 $banner = @"
 /*

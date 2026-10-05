@@ -1,10 +1,12 @@
 import {
     App,
+    FuzzySuggestModal,
     Notice,
     Plugin,
     PluginSettingTab,
     SettingDefinitionItem,
     TFile,
+    TFolder,
     normalizePath,
 } from "obsidian";
 
@@ -24,6 +26,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
     return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+/**
+ * Pulls a string array out of JSON text that failed to parse, e.g. when a
+ * comma is missing between entries. Returns null when the key is absent.
+ */
+function extractStringArrayLoose(raw: string, key: string): string[] | null {
+    const match = new RegExp(`"${key}"\\s*:\\s*\\[`).exec(raw);
+    if (!match) {
+        return null;
+    }
+    const start = match.index + match[0].length;
+    const end = raw.indexOf("]", start);
+    if (end === -1) {
+        return null;
+    }
+    const body = raw.slice(start, end);
+    const values: string[] = [];
+    const stringLiteral = /"((?:[^"\\]|\\.)*)"/g;
+    let item: RegExpExecArray | null;
+    while ((item = stringLiteral.exec(body)) !== null) {
+        try {
+            values.push(JSON.parse(`"${item[1]}"`) as string);
+        } catch {
+            values.push(item[1]);
+        }
+    }
+    return values;
 }
 
 /**
@@ -86,15 +116,62 @@ function isExcludedFolder(filePath: string, excludedFolders: string[]): boolean 
  */
 export default class MyTaskChecker extends Plugin {
     settings: TaskCheckerSettings = { ...DEFAULT_SETTINGS };
+    /** Set when data.json exists but cannot be read; blocks overwriting it. */
+    private settingsFileUnreadable = false;
+    private saveBlockedNoticeShown = false;
 
     async loadSettings() {
         const knownPaths = this.app.vault.getAllLoadedFiles().map((file) => file.path);
-        const loadedData = await this.loadData() as unknown;
-        this.settings = parseSettings(loadedData, knownPaths);
+
+        let loadedData: unknown = null;
+        try {
+            loadedData = await this.loadData();
+        } catch (error: unknown) {
+            console.error("Task Checker: data.json is not valid JSON", error);
+        }
+
+        if (loadedData != null) {
+            this.settings = parseSettings(loadedData, knownPaths);
+            return;
+        }
+
+        const raw = await this.readSettingsFile();
+        if (raw == null || raw.trim() === "") {
+            this.settings = { ...DEFAULT_SETTINGS };
+            return;
+        }
+
+        const folders = extractStringArrayLoose(raw, "excludedFolders") ?? [];
+        const files = extractStringArrayLoose(raw, "excludedFiles") ?? [];
+        if (folders.length === 0 && files.length === 0) {
+            this.settings = { ...DEFAULT_SETTINGS };
+            this.settingsFileUnreadable = true;
+            new Notice("Task Checker: data.json is corrupt. Fix the file, then reload the plugin.");
+            return;
+        }
+
+        this.settings = parseSettings({ excludedFolders: folders, excludedFiles: files }, knownPaths);
+        await this.saveSettings();
+        new Notice("Task Checker repaired your settings file (data.json).");
     }
 
     async saveSettings() {
+        if (this.settingsFileUnreadable) {
+            if (!this.saveBlockedNoticeShown) {
+                this.saveBlockedNoticeShown = true;
+                new Notice("Task Checker: not saving because data.json is corrupt. Fix the file, then reload the plugin.");
+            }
+            return;
+        }
         await this.saveData(this.settings);
+    }
+
+    private async readSettingsFile(): Promise<string | null> {
+        try {
+            return await this.app.vault.adapter.read(normalizePath(`${this.manifest.dir}/data.json`));
+        } catch {
+            return null;
+        }
     }
 
     async onload() {
@@ -189,45 +266,58 @@ export default class MyTaskChecker extends Plugin {
     }
 }
 
+class FolderPickerModal extends FuzzySuggestModal<TFolder> {
+    private readonly onPick: (folder: TFolder) => void;
+
+    constructor(app: App, onPick: (folder: TFolder) => void) {
+        super(app);
+        this.onPick = onPick;
+        this.setPlaceholder("Select a folder");
+    }
+
+    getItems(): TFolder[] {
+        return this.app.vault
+            .getAllLoadedFiles()
+            .filter((file): file is TFolder => file instanceof TFolder && file.path !== "/");
+    }
+
+    getItemText(folder: TFolder): string {
+        return folder.path;
+    }
+
+    onChooseItem(folder: TFolder): void {
+        this.onPick(folder);
+    }
+}
+
+class FilePickerModal extends FuzzySuggestModal<TFile> {
+    private readonly onPick: (file: TFile) => void;
+
+    constructor(app: App, onPick: (file: TFile) => void) {
+        super(app);
+        this.onPick = onPick;
+        this.setPlaceholder("Select a file");
+    }
+
+    getItems(): TFile[] {
+        return this.app.vault.getMarkdownFiles();
+    }
+
+    getItemText(file: TFile): string {
+        return file.path;
+    }
+
+    onChooseItem(file: TFile): void {
+        this.onPick(file);
+    }
+}
+
 class TaskCheckerSettingTab extends PluginSettingTab {
     plugin: MyTaskChecker;
 
     constructor(app: App, plugin: MyTaskChecker) {
         super(app, plugin);
         this.plugin = plugin;
-    }
-
-    getControlValue(key: string): unknown {
-        const folderMatch = /^excludedFolders\.(\d+)$/.exec(key);
-        if (folderMatch) {
-            return this.plugin.settings.excludedFolders[Number(folderMatch[1])] ?? "";
-        }
-
-        const fileMatch = /^excludedFiles\.(\d+)$/.exec(key);
-        if (fileMatch) {
-            return this.plugin.settings.excludedFiles[Number(fileMatch[1])] ?? "";
-        }
-
-        return super.getControlValue(key);
-    }
-
-    async setControlValue(key: string, value: unknown): Promise<void> {
-        if (typeof value !== "string") {
-            return;
-        }
-
-        const folderMatch = /^excludedFolders\.(\d+)$/.exec(key);
-        if (folderMatch) {
-            this.plugin.settings.excludedFolders[Number(folderMatch[1])] = value;
-            await this.plugin.saveSettings();
-            return;
-        }
-
-        const fileMatch = /^excludedFiles\.(\d+)$/.exec(key);
-        if (fileMatch) {
-            this.plugin.settings.excludedFiles[Number(fileMatch[1])] = value;
-            await this.plugin.saveSettings();
-        }
     }
 
     getSettingDefinitions(): SettingDefinitionItem[] {
@@ -242,8 +332,10 @@ class TaskCheckerSettingTab extends PluginSettingTab {
                 addItem: {
                     name: "Add folder",
                     action: () => {
-                        folders.push("");
-                        this.persist(true);
+                        new FolderPickerModal(this.app, (folder) => {
+                            folders.push(folder.path);
+                            this.persist(true);
+                        }).open();
                     },
                 },
                 onReorder: (oldIndex: number, newIndex: number) => {
@@ -255,14 +347,14 @@ class TaskCheckerSettingTab extends PluginSettingTab {
                     folders.splice(idx, 1);
                     this.persist(true);
                 },
-                items: folders.map((_folder, index) => ({
-                    name: "Folder",
+                items: folders.map((folder) => ({
+                    name: folder || "(no folder selected)",
                     searchable: false,
-                    control: {
-                        type: "folder" as const,
-                        key: `excludedFolders.${index}`,
-                        includeRoot: false,
-                        placeholder: "Select a folder",
+                    action: (el: HTMLElement, index: number) => {
+                        new FolderPickerModal(this.app, (picked) => {
+                            folders[index] = picked.path;
+                            this.persist(true);
+                        }).open();
                     },
                 })),
             },
@@ -273,8 +365,10 @@ class TaskCheckerSettingTab extends PluginSettingTab {
                 addItem: {
                     name: "Add file",
                     action: () => {
-                        files.push("");
-                        this.persist(true);
+                        new FilePickerModal(this.app, (file) => {
+                            files.push(file.path);
+                            this.persist(true);
+                        }).open();
                     },
                 },
                 onReorder: (oldIndex: number, newIndex: number) => {
@@ -286,14 +380,14 @@ class TaskCheckerSettingTab extends PluginSettingTab {
                     files.splice(idx, 1);
                     this.persist(true);
                 },
-                items: files.map((_file, index) => ({
-                    name: "File",
+                items: files.map((file) => ({
+                    name: file || "(no file selected)",
                     searchable: false,
-                    control: {
-                        type: "file" as const,
-                        key: `excludedFiles.${index}`,
-                        placeholder: "Select a file",
-                        filter: (file: TFile) => file.extension === "md",
+                    action: (el: HTMLElement, index: number) => {
+                        new FilePickerModal(this.app, (picked) => {
+                            files[index] = picked.path;
+                            this.persist(true);
+                        }).open();
                     },
                 })),
             },
