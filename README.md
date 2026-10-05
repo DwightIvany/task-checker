@@ -30,10 +30,10 @@ ex. todo-files-2026-09-13
 Download `main.js` and `manifest.json` from the [latest release](https://github.com/DwightIvany/task-checker/releases/latest) and copy them into your vault's plugin folder:
 
 ```
-<your vault>/.obsidian/plugins/task-checker/
+<your vault>/.obsidian/plugins/my-task-checker/
 ```
 
-Create the `task-checker` folder if it doesn't exist. Then enable the plugin under **Settings → Community plugins**.
+Create the `my-task-checker` folder if it doesn't exist. Then enable the plugin under **Settings → Community plugins**.
 
 ## Usage
 
@@ -82,7 +82,7 @@ On Windows without Node/npm, use the standalone build script (downloads `tools/e
 .\build.ps1
 ```
 
-The script builds `main.js` in the repo root and copies `main.js` and `manifest.json` into `..\..\ToDo\personal\.obsidian\plugins\task-checker` (relative to this folder), ready to reload in Obsidian.
+The script builds `main.js` in the repo root and copies `main.js` and `manifest.json` into `..\..\ToDo\personal\.obsidian\plugins\my-task-checker` (relative to this folder), ready to reload in Obsidian.
 
 ## Releasing
 
