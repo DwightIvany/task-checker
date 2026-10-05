@@ -114,7 +114,7 @@ function isExcludedFolder(filePath: string, excludedFolders: string[]): boolean 
  * Scans the vault for notes with incomplete tasks (`- [ ]`) and can write
  * a dated list of wikilinks, or report how many such notes exist.
  */
-export default class MyTaskChecker extends Plugin {
+export default class TaskChecker extends Plugin {
     settings: TaskCheckerSettings = { ...DEFAULT_SETTINGS };
     /** Set when data.json exists but cannot be read; blocks overwriting it. */
     private settingsFileUnreadable = false;
@@ -313,9 +313,9 @@ class FilePickerModal extends FuzzySuggestModal<TFile> {
 }
 
 class TaskCheckerSettingTab extends PluginSettingTab {
-    plugin: MyTaskChecker;
+    plugin: TaskChecker;
 
-    constructor(app: App, plugin: MyTaskChecker) {
+    constructor(app: App, plugin: TaskChecker) {
         super(app, plugin);
         this.plugin = plugin;
     }

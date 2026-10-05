@@ -1,7 +1,7 @@
 {
-    "id": "my-task-checker",
+    "id": "task-checker",
     "name": "Task Checker",
-    "version": "1.3.4",
+    "version": "1.3.5",
     "minAppVersion": "1.13.0",
     "description": "Finds notes containing incomplete tasks and writes a dated list of links.",
     "author": "Dwight Ivany",
